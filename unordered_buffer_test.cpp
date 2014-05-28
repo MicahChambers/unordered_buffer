@@ -1,5 +1,9 @@
 #include <utility>
+#include <iostream>
 #include "unordered_buffer.h"
+
+using std::cerr;
+using std::endl;
 
 int main()
 {
@@ -24,7 +28,7 @@ int main()
 		which = (which+1)%NUM;
 		if(ret.second) {
 			if(ret.first->first != key || ret.first->second != value) {
-				cerr << "Error, mismatch of key or value" << endl;;
+				cerr << "Error, mismatch of key or value" << endl;
 				return -1;
 			} 
 			cerr << "@";
@@ -35,7 +39,7 @@ int main()
 		// use a ranodm key/value
 		key = rand();
 		value = rand()/(double)RAND_MAX;
-		ret = buff.insert(std::make_pair<int,double>(key, value));
+		ret = buff.insert(std::make_pair(key, value));
 		
 		// return whether this was a hit or not
 		if(ret.second) {
