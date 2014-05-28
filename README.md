@@ -2,10 +2,10 @@ unordered_buffer
 ================
 
 In the spirit of unordered_map, this is a probabalistic buffer. In essence you 
-can insert things into the buffer, and they will replace collisions at a
-probability comparable to the hit rate of the time they are replacing. So in
-theory, whichever item matches a bucket gets more hits will be placed in the
-bucket. 
+can insert things into the buffer, and they will replace colliding keys at a
+probability comparable to the hit rate of the element they are trying to replace.
+So in theory, whichever item matches a bucket gets more hits will be placed in
+the bucket, and kept around.
 
 For the current occupier of the bucket, its probability of being displaced 
 is 2^(hits-contests), where hits are repeated uses of the current occupier,
