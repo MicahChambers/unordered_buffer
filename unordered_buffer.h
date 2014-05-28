@@ -10,7 +10,9 @@ class unordered_buffer
 {
 
 /******************************************************************************
+ *
  * Data
+ *
  ******************************************************************************/
 private:
 	
@@ -24,20 +26,22 @@ private:
 	// big array of the data, 0 = priority, 1 = key, 2 = data
 	// keeps the priority, 0 indicates unused
 	std::vector<Element> m_data;
-	std::list<std::pair<Key, T>*> m_used;
+	std::list<Element*> m_used;
 
 	// it = m_used.begin();
 	// *it is a pair
 	// it->first
 
-	const Hash m_hasher;
 	std::default_random_engine m_rng;
 	std::uniform_real_distribution<double> m_rdist;
+	const Hash m_hasher;
 
 	const int MAX_PRIORITY = 1000;
 
 /******************************************************************************
+ *
  * Functions 
+ *
  ******************************************************************************/
 public:
 #ifndef NDEUBG
@@ -59,7 +63,7 @@ public:
 		};
 		
 		std::pair<Key,T>* operator->(){
-			return &(*(*it));
+			return &((*it)->value);
 		};
 		
 		// movement
@@ -88,7 +92,7 @@ public:
 	private:
 		friend class unordered_buffer<Key,T,Hash>;
 
-		typename std::list<std::pair<Key,T>*>::iterator it;
+		typename std::list<Element*>::iterator it;
 	};
 	
 	class const_iterator {
@@ -138,7 +142,7 @@ public:
 	private:
 		friend class unordered_buffer<Key,T,Hash>;
 		
-		typename std::list<std::pair<Key,T>*>::const_iterator it;
+		typename std::list<Element*>::const_iterator it;
 	};
 
 	// iterator functions
@@ -170,12 +174,12 @@ public:
 		return tmp;
 	};
 
-	/* 
+	/**************************************************************************
 	 * Constructors
-	 */
+	**************************************************************************/
 
-	//constructor
-	unordered_buffer(size_t size) : m_rng(time(NULL)), m_rdist(0,1), m_hasher()
+	//basic constructor
+	unordered_buffer(size_t size = 1024) : m_rng(time(NULL)), m_rdist(0,1), m_hasher()
 	{
 		m_data.resize(size);
 
@@ -187,13 +191,95 @@ public:
 		m_used.clear();
 	};
 
+	//range constructor
+	template<class InputIterator>
+	unordered_buffer(InputIterator first, InputIterator last, size_t size=1024) 
+		: m_rng(time(NULL)), m_rdist(0,1), m_hasher()
+	{
+		m_data.resize(size);
+
+		// set used variable to false
+		for(size_t ii=0; ii<m_data.size(); ii++) {
+			m_data[ii].priority = 0;
+		}
+
+		m_used.clear();
+		
+		// now emplace the data
+		for(auto it=first; it!=last; it++) {
+			emplace(it.first, it.second);
+		}
+	};
+	
+	//initializer list constructor
+	template<class InputIterator>
+	unordered_buffer(std::initializer_list<std::pair<Key,T>> il, size_t size=1024) 
+		: m_rng(time(NULL)), m_rdist(0,1), m_hasher()
+	{
+		m_data.resize(size);
+
+		// set used variable to false
+		for(size_t ii=0; ii<m_data.size(); ii++) {
+			m_data[ii].priority = 0;
+		}
+
+		m_used.clear();
+		
+		// now emplace the data
+		for(auto it=il.begin(); it!=il.end(); it++) {
+			emplace(it.first, it.second);
+		}
+	};
+	
+	//copy constructor
+	unordered_buffer(const unordered_buffer& ump) : m_rng(time(NULL)), m_rdist(0,1), m_hasher()
+	{
+		m_data = ump.m_data;
+		m_used = ump.m_used;
+	};
+	
+	//move constructor
+	unordered_buffer(unordered_buffer&& ump) : m_rng(time(NULL)), m_rdist(0,1), m_hasher()
+	{
+		m_data = std::move(ump.m_data);
+		m_used = std::move(ump.m_used);
+	};
+
+	// swap
+	void swap(unordered_buffer& ump)
+	{
+		std::swap(ump.m_data, m_data);
+		std::swap(ump.m_used, m_used);
+	};
+
+	// assignment
+	unordered_buffer& operator=(const unordered_buffer& ump)
+	{
+		m_data = ump.m_data;
+		m_used = ump.m_used;
+	};
+	
+	unordered_buffer& operator=(unordered_buffer&& ump)
+	{
+		m_data = std::move(ump.m_data);
+		m_used = std::move(ump.m_used);
+	};
+	
+	unordered_buffer& operator=(std::initializer_list<std::pair<Key,T>>& il)
+	{
+		clear();
+		// now emplace the data
+		for(auto it=il.begin(); it!=il.end(); it++) {
+			emplace(it.first, it.second);
+		}
+	};
+
 	// destructor
 	~unordered_buffer() {} ;
 
-	/* 
+	/**************************************** 
 	 * Const Information Functions 
-	 */
-	
+	 ****************************************/
 	// capacity
 	bool empty() const
 	{
@@ -219,7 +305,7 @@ public:
 	};
 
 	/**************************************************************************
-	 * modifiers
+	 * Overall Settings/Changes
 	 *************************************************************************/
 	void clear()
 	{
@@ -230,18 +316,152 @@ public:
 			m_data[ii].priority = 0;
 		}
 	};
+
+	void rehash(size_t n)
+	{
+		std::vector<Element> newdata(n);
+		std::list<Element*> newused(n);
+
+		for(auto it=m_used.begin(); it!=m_used.end(); it++) {
+			size_t newbucket = m_hasher(std::get<0>(it->value))%n;
+			newdata[newbucket].priority = it->priority;
+			newdata[newbucket].value = std::move(it->value);
+
+			newused.push_front(&newdata[newbucket]);
+			newdata[newbucket].pos = newused.begin();
+		}
+		
+		m_data = std::move(newdata);
+		m_used = std::move(newused);
+	};
+
+	void reserve(size_t n)
+	{
+		if(n > m_data.size())
+			rehash(n);
+		return 0;
+	};
+
+	/**************************************************************************
+	 * deletions
+	 *************************************************************************/
+	iterator erase(const_iterator pos)
+	{
+		iterator out = pos;
+		out->priority = 0;
+		m_used.erase(out->pos.it);
+		return out;
+	};
+	
+	iterator erase(const_iterator first, const_iterator last)
+	{
+		iterator out = first;
+		for(; out != cend() && out != last; ++out) {
+			out->priority = 0;
+			m_used.erase(out->pos.it);
+		}
+		return out;
+	};
+	
+	size_t erase(const Key& key)
+	{
+		auto& data = m_data[bucket(key)];
+
+		// if not found, just return 0
+		if(data.priority <= 0)
+			return 0;
+		
+		erase(data.pos);
+		return 1;
+	};
+
+
+
+	/**************************************************************************
+	 * insertions, these all trigger change in priority in the case of a hit
+	 *************************************************************************/
+
+	//////////////////////
+	// Copy Insert
+	//////////////////////
 	
 	// insert an element probabilistically, makes a copy of the input values
-	std::pair<iterator, bool> emplace_hint(const_iterator it, Key&& key, T&& value, bool prob = true)
+	std::pair<iterator, bool> insert(const std::pair<Key, T>& value)
 	{
-		return emplace(key, value, prob);
+
+		auto& data = m_data[bucket(value.first)];
+
+		/************************************
+		 * Miss
+		 ************************************/
+		// if not yet used, set to used and copy key
+		if(data.priority <= 0) {
+
+			// set bin to used
+			data.priority = 1;
+
+			// copy into bin
+			std::get<0>(data.value) = value.first;
+			std::get<1>(data.value) = value.second;
+
+			// add to list of used bins
+			m_used.push_front(&data);
+			data.pos = m_used.begin();
+			
+			return std::make_pair<iterator, bool>(m_used.begin(), true);
+		} 
+		/************************************
+		 * Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == value.first) {
+			/*
+			 * keys are equal, increase priority
+			 */
+			data.priority++;
+			return std::make_pair<iterator, bool>(data.pos, false);
+		} else {
+			/*
+			 * keys are different, probabilistically replace 
+			 */
+			
+			// the higher the probability, the lower the odds of replacement
+			if(m_rdist(m_rng) < pow(2,-data.priority)) {
+				std::get<0>(data.value) = value.first;
+				std::get<1>(data.value) = value.second;
+				data.priority = 1;
+				
+				// return new 
+				return std::make_pair<iterator, bool>(data.pos, true);
+			} else {
+				// return old
+				return std::make_pair<iterator, bool>(data.pos, false);
+			}
+		}
+	};
+	
+	// insert an element probabilistically, makes a copy of the input values
+	std::pair<iterator, bool> insert(const_iterator hint, 
+			const std::pair<Key, T>& value)
+	{
+		// ignore the hint
+		(void)(hint);
+		return insert(value);
+	};
+	
+	////////////////////////////
+	// Move Insert 
+	////////////////////////////
+	
+	// insert an element probabilistically, makes a copy of the input values
+	std::pair<iterator, bool> emplace_hint(const_iterator it, Key&& key, T&& value)
+	{
+		return emplace(key, value);
 	};
 
 	// insert an element probabilistically, makes a copy of the input values
-	std::pair<iterator, bool> emplace(Key&& key, T&& value, bool prob = true)
+	std::pair<iterator, bool> emplace(Key&& key, T&& value)
 	{
-		size_t hash = m_hasher(key);
-		auto& data = m_data[hash%m_data.size()];
+		auto& data = m_data[bucket(key)];
 
 		/************************************
 		 * Miss
@@ -271,7 +491,7 @@ public:
 			 */
 			data.priority++;
 			return std::make_pair<iterator, bool>(data.pos, false);
-		} else if(prob) {
+		} else {
 			/*
 			 * keys are different, probabilistically replace 
 			 */
@@ -288,87 +508,12 @@ public:
 				// return old
 				return std::make_pair<iterator, bool>(data.pos, false);
 			}
-		} else {
-			/*
-			 * keys are different, replace 
-			 */
-			std::get<0>(data.value) = key;
-			std::get<1>(data.value) = value;
-			data.priority = 1;
-
-			return std::make_pair<iterator, bool>(data.pos, true);
-		}
-	};
-
-	// insert an element probabilistically, makes a copy of the input values
-	std::pair<iterator, bool> insert(const std::pair<Key, T>& value, bool prob = true)
-	{
-
-		size_t hash = m_hasher(value.first);
-		auto& data = m_data[hash%m_data.size()];
-
-		/************************************
-		 * Miss
-		 ************************************/
-		// if not yet used, set to used and copy key
-		if(data.priority <= 0) {
-
-			// set bin to used
-			data.priority = 1;
-
-			// copy into bin
-			std::get<0>(data.value) = value.first;
-			std::get<1>(data.value) = value.second;
-
-			// add to list of used bins
-			m_used.push_front(&data);
-			data.pos = m_used.begin();
-			
-			return std::make_pair<iterator, bool>(m_used.begin(), true);
-		} 
-		/************************************
-		 * Hit
-		 ************************************/
-		else if(std::get<0>(data.value) == value.first) {
-			/*
-			 * keys are equal, increase priority
-			 */
-			data.priority++;
-			return std::make_pair<iterator, bool>(data.pos, false);
-		} else if(prob) {
-			/*
-			 * keys are different, probabilistically replace 
-			 */
-			
-			// the higher the probability, the lower the odds of replacement
-			if(m_rdist(m_rng) < pow(2,-data.priority)) {
-				std::get<0>(data.value) = value.first;
-				std::get<1>(data.value) = value.second;
-				data.priority = 1;
-				
-				// return new 
-				return std::make_pair<iterator, bool>(data.pos, true);
-			} else {
-				// return old
-				return std::make_pair<iterator, bool>(data.pos, false);
-			}
-		} else {
-			/*
-			 * keys are different, replace 
-			 */
-			std::get<0>(data.value) = value.first;
-			std::get<1>(data.value) = value.second;
-			data.priority = 1;
-
-			return std::make_pair<iterator, bool>(data.pos, true);
 		}
 	};
 	
-	// moves input pair
-	std::pair<iterator, bool> insert(std::pair<Key, T>&& value, bool prob = true)
+	std::pair<iterator, bool> insert(std::pair<Key, T>&& value)
 	{
-		size_t hash = m_hasher(value.first);
-		auto& data = m_data[hash%m_data.size()];
+		auto& data = m_data[bucket(value.first)];
 		
 		/************************************
 		 * Miss
@@ -384,7 +529,7 @@ public:
 			std::get<1>(data.value) = std::move(value.second);
 
 			// add to list of used bins
-			m_used.push_front(&data.value);
+			m_used.push_front(&data);
 			data.pos = this->begin();
 
 			return std::make_pair<iterator, bool>(this->begin(), true);
@@ -398,7 +543,7 @@ public:
 			 */
 			data.priority++;
 			return std::make_pair(data.pos, false);
-		} else if(prob) {
+		} else {
 			/*
 			 * keys are different, probabilistically replace 
 			 */
@@ -415,26 +560,198 @@ public:
 				// return old
 				return std::make_pair(data.pos, false);
 			}
-		} else {
-			/*
-			 * keys are different, replace 
-			 */
-			std::get<0>(data.value) = std::move(value.first);
-			std::get<1>(data.value) = std::move(value.second);
+		}
+	};
+	
+	std::pair<iterator, bool> insert(const_iterator hint, 
+			std::pair<Key, T>&& value)
+	{
+		(void)(hint);
+		return insert(value);
+	};
+	
+	template <class InputIterator>
+	void insert(InputIterator first, InputIterator last)
+	{
+		for(auto it=first; it!=last; it++) {
+			emplace(it.first, it.second);
+		}
+	};
+	
+	void insert(std::initializer_list<std::pair<Key,T>> il) 
+	{
+		for(auto it=il.begin(); it!=il.end(); it++) {
+			emplace(it.first, it.second);
+		}
+	};
+	
+	// bracket operator
+	T& operator[](const Key& key)
+	{
+		auto& data = m_data[bucket(key)];
+
+		/************************************
+		 * Miss
+		 ************************************/
+		// if not yet used, set to used and copy key
+		if(data.priority <= 0) {
+
+			// set bin to used
 			data.priority = 1;
 
-			return std::make_pair(data.pos, true);
+			// copy into bin
+			std::get<0>(data.value) = key;
+			std::get<1>(data.value) = T();
+
+			// add to list of used bins
+			m_used.push_front(&data);
+			data.pos = m_used.begin();
+
+			return std::get<1>(data.value);
+		} 
+		/************************************
+		 * Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == key) {
+			/*
+			 * keys are equal, increase priority
+			 */
+			data.priority++;
+			return std::get<1>(data.value);
+		} else {
+			/*
+			 * keys are different, probabilistically replace 
+			 */
+			
+			// the higher the probability, the lower the odds of replacement
+			if(m_rdist(m_rng) < pow(2,-data.priority)) {
+				std::get<0>(data.value) = key;
+				std::get<1>(data.value) = T();
+				data.priority = 1;
+				
+				// return new 
+				return std::get<1>(data.value);
+			} else {
+				// return old
+				return std::get<1>(data.value);
+			}
+		}
+	};
+	
+	// bracket operator
+	T& operator[](Key&& key)
+	{
+		auto& data = m_data[bucket(key)];
+
+		/************************************
+		 * Miss
+		 ************************************/
+		// if not yet used, set to used and copy key
+		if(data.priority <= 0) {
+
+			// set bin to used
+			data.priority = 1;
+
+			// copy into bin
+			std::get<0>(data.value) = std::move(key);
+			std::get<1>(data.value) = T();
+
+			// add to list of used bins
+			m_used.push_front(&data);
+			data.pos = m_used.begin();
+
+			return std::get<1>(data.value);
+		} 
+		/************************************
+		 * Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == key) {
+			/*
+			 * keys are equal, increase priority
+			 */
+			data.priority++;
+			return std::get<1>(data.value);
+		} else {
+			/*
+			 * keys are different, probabilistically replace 
+			 */
+			
+			// the higher the probability, the lower the odds of replacement
+			if(m_rdist(m_rng) < pow(2,-data.priority)) {
+				std::get<0>(data.value) = key;
+				std::get<1>(data.value) = T();
+				data.priority = 1;
+				
+				// return new 
+				return std::get<1>(data.value);
+			} else {
+				// return old
+				return std::get<1>(data.value);
+			}
 		}
 	};
 
 	/**************************************************************************
 	 * Accessors that do not trigger change in priority
 	 *************************************************************************/
+	
+	iterator find(const Key& key)
+	{
+		auto& data = m_data[bucket(key)];
+		
+		/************************************
+		 * Miss
+		 ************************************/
+		// if not yet used, set to used and copy key
+		if(data.priority <= 0) {
+			return this->end();
+		} 
+		/************************************
+		 * Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == key) {
+			/*
+			 * keys are equal, 
+			 */
+			return data.pos;
+		} else {
+			/*
+			 * keys are different, 
+			 */
+			return this->end();
+		}
+	};
+	
+	const_iterator find(const Key& key) const
+	{
+		auto& data = m_data[bucket(key)];
+		
+		/************************************
+		 * Miss
+		 ************************************/
+		// if not yet used, set to used and copy key
+		if(data.priority <= 0) {
+			return this->cend();
+		} 
+		/************************************
+		 * Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == key) {
+			/*
+			 * keys are equal, 
+			 */
+			return data.pos;
+		} else {
+			/*
+			 * keys are different, 
+			 */
+			return this->cend();
+		}
+	};
 
 	T& at(const Key& key)
 	{
-		size_t hash = m_hasher(key);
-		auto& data = m_data[hash%m_data.size()];
+		auto& data = m_data[bucket(key)];
 
 		/************************************
 		 * Miss
@@ -462,8 +779,7 @@ public:
 	
 	const T& at(const Key& key) const
 	{
-		size_t hash = m_hasher(key);
-		auto& data = m_data[hash%m_data.size()];
+		auto& data = m_data[bucket(key)];
 
 		/************************************
 		 * Miss
@@ -491,13 +807,12 @@ public:
 
 	size_t bucket(const Key& key)
 	{
-		return m_hasher(key);
+		return m_hasher(key)%m_data.size();
 	};
 	
 	size_t count(const Key& key) const
 	{
-		size_t hash = m_hasher(key);
-		auto& data = m_data[hash%m_data.size()];
+		auto& data = m_data[bucket(key)];
 
 		/************************************
 		 * Miss
@@ -524,8 +839,7 @@ public:
 
 	std::pair<iterator,iterator> equal_range(const Key& key)
 	{
-		size_t hash = m_hasher(key);
-		auto& data = m_data[hash%m_data.size()];
+		auto& data = m_data[bucket(key)];
 
 		/************************************
 		 * Miss
@@ -549,32 +863,31 @@ public:
 		}
 	}
 
-//	std::pair<const_iterator,const_iterator> equal_range(const Key& key)
-//	{
-//		size_t hash = m_hasher(key);
-//		auto& data = m_data[hash%m_data.size()];
-//
-//		/************************************
-//		 * Miss
-//		 ************************************/
-//		// if not yet used, set to used and copy key
-//		if(data.priority <= 0) {
-//			return std::make_pair(cend(), cend());
-//		} 
-//		/************************************
-//		 * Bin Hit
-//		 ************************************/
-//		else if(std::get<0>(data.value) == key) {
-//			/* keys are equal, Hit */
-//			auto tmp = (const_iterator)data.pos;
-//			return std::make_pair(tmp, tmp);
-//		} else {
-//		/************************************
-//		 * Key Miss / Bin Hit
-//		 ************************************/
-//			/* keys are different, Miss */
-//			return std::make_pair(cend(), cend());
-//		}
-//	}
+	std::pair<const_iterator,const_iterator> equal_range(const Key& key) const
+	{
+		auto& data = m_data[bucket(key)];
+
+		/************************************
+		 * Miss
+		 ************************************/
+		// if not yet used, set to used and copy key
+		if(data.priority <= 0) {
+			return std::make_pair(cend(), cend());
+		} 
+		/************************************
+		 * Bin Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == key) {
+			/* keys are equal, Hit */
+			auto tmp = (const_iterator)data.pos;
+			return std::make_pair(tmp, tmp);
+		} else {
+		/************************************
+		 * Key Miss / Bin Hit
+		 ************************************/
+			/* keys are different, Miss */
+			return std::make_pair(cend(), cend());
+		}
+	}
 };
 

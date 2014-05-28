@@ -13,7 +13,6 @@ int main()
 
 	std::unordered_map<int, double> truestore;
 	
-	int which = 0;
 	size_t NUM = 3;
 	double KEYS[NUM] = {28, 9, 0};
 	double VALUES[NUM] = {.32, 1.8, 23};
@@ -33,8 +32,8 @@ int main()
 			// use a ranodm key/value
 			key = rand();
 			value = rand()/(double)RAND_MAX;
-			auto bret = buff.insert(std::make_pair(key, value));
-			auto tret = truestore.insert(std::make_pair(key, value));
+			buff.insert(std::make_pair(key, value));
+			truestore.insert(std::make_pair(key, value));
 		}
 			
 		// use one of the 3
