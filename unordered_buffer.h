@@ -8,8 +8,41 @@
 template <class Key, class T, class Hash = std::hash<Key>>
 class unordered_buffer
 {
-public:
 
+/******************************************************************************
+ * Data
+ ******************************************************************************/
+private:
+	
+	struct Element
+	{
+		int priority;
+		typename unordered_buffer::iterator pos; 	//position in used list
+		std::pair<Key, T> value;			//actual values
+	};
+
+	// big array of the data, 0 = priority, 1 = key, 2 = data
+	// keeps the priority, 0 indicates unused
+	std::vector<Element> m_data;
+	std::list<std::pair<Key, T>*> m_used;
+
+	// it = m_used.begin();
+	// *it is a pair
+	// it->first
+
+	const Hash m_hasher;
+	std::default_random_engine m_rng;
+	std::uniform_real_distribution<double> m_rdist;
+
+	const int MAX_PRIORITY = 1000;
+
+/******************************************************************************
+ * Functions 
+ ******************************************************************************/
+public:
+#ifndef NDEUBG
+	bool loud;
+#endif //NDEBUG
 	/* 
 	 * Iterators
 	 */
@@ -191,125 +224,208 @@ public:
 	// insert an element probabilistically, makes a copy of the input values
 	std::pair<iterator, bool> insert(const std::pair<Key, T>& value, bool prob = true)
 	{
+
 		size_t hash = m_hasher(value.first);
+		auto& data = m_data[hash%m_data.size()];
+#ifndef	NDEBUG
+		if(loud){
+			std::cerr << std::endl << "Insertion" << std::endl;
+			std::cerr << value.first << ":" << value.second << std::endl;
+			std::cerr << data.value.first << ":" << data.value.second << std::endl;
+			std::cerr << hash << ", " << data.priority << std::endl;
+		}
+#endif //NDEBUG
 
-
+		/************************************
+		 * Miss
+		 ************************************/
 		// if not yet used, set to used and copy key
-		if(m_data[hash%m_data.size()].priority <= 0) {
+		if(data.priority <= 0) {
 
 			// set bin to used
-			m_data[hash%m_data.size()].priority = 1;
-
+			data.priority = 1;
 
 			// copy into bin
-			std::get<0>(m_data[hash%m_data.size()].value) = value.first;
-			std::get<1>(m_data[hash%m_data.size()].value) = value.second;
+			std::get<0>(data.value) = value.first;
+			std::get<1>(data.value) = value.second;
 
 			// add to list of used bins
-			m_used.push_front(&m_data[hash%m_data.size()]);
-			m_data[hash%m_data.size()].pos = m_used.begin();
+			m_used.push_front(&data);
+			data.pos = m_used.begin();
+			
+#ifndef NDEBUG
+			if(loud){
+				std::cerr << "New" << std::endl;
+				std::cerr << (*(data.pos)).first << ":" << (*(data.pos)).first 
+					<< std::endl;
+			}
+#endif //NDEBUG
 
 			return std::make_pair<iterator, bool>(m_used.begin(), true);
-		}
-
-		auto& data = m_data[hash%m_data.size()];
-
-		// if the value exists, and keys are equal, increase priority
-		if(std::get<0>(data.value) == value.first) {
-			data.priority++;
-			return std::make_pair<iterator, bool>(data.pos, true);
-		} else {
-			bool doinsert = true;
-			if(prob) {
-				// probabilistic insert
-				doinsert = false; 
-
-				// the higher the probability, the lower the odds of replacement
-				if(m_rdist(m_rng) < exp(-data.priority))
-					doinsert = true;
+		} 
+		/************************************
+		 * Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == value.first) {
+#ifndef NDEBUG
+			if(loud){
+				std::cerr << "Hit" << std::endl;
 			}
+#endif //NDEBUG
 
-			if(doinsert) {
-				// change the key, reinitialize data
+			/*
+			 * keys are equal, increase priority
+			 */
+			data.priority++;
+			return std::make_pair<iterator, bool>(data.pos, false);
+		} else if(prob) {
+			/*
+			 * keys are different, probabilistically replace 
+			 */
+			
+			// the higher the probability, the lower the odds of replacement
+			if(m_rdist(m_rng) < pow(2,-data.priority)) {
+#ifndef NDEBUG
+				if(loud){
+					std::cerr << "Prob Replace" << std::endl;
+				}
+#endif //NDEBUG
 				std::get<0>(data.value) = value.first;
 				std::get<1>(data.value) = value.second;
+				data.priority = 1;
+				
+				// return new 
+				return std::make_pair<iterator, bool>(data.pos, true);
+			} else {
+				// return old
+#ifndef NDEBUG
+				if(loud){
+					std::cerr << "Prob Keep" << std::endl;
+				}
+#endif //NDEBUG
+				return std::make_pair<iterator, bool>(data.pos, false);
 			}
+		} else {
+#ifndef NDEBUG
+			if(loud){
+				std::cerr << "Force Replace" << std::endl;
+			}
+#endif //NDEBUG
+			/*
+			 * keys are different, replace 
+			 */
+			std::get<0>(data.value) = value.first;
+			std::get<1>(data.value) = value.second;
+			data.priority = 1;
+
 			return std::make_pair<iterator, bool>(data.pos, true);
 		}
 	};
-
+	
 	// moves input pair
 	std::pair<iterator, bool> insert(std::pair<Key, T>&& value, bool prob = true)
 	{
 		size_t hash = m_hasher(value.first);
+		auto& data = m_data[hash%m_data.size()];
+		
+#ifndef NDEBUG
+		if(loud){
+			std::cerr << std::endl << "Insertion" << std::endl;
+			std::cerr << value.first << ":" << value.second << std::endl;
+			std::cerr << data.value.first << ":" << data.value.second << std::endl;
+			std::cerr << hash << ", " << data.priority << std::endl;
+		}
+#endif //NDEBUG
 
+		/************************************
+		 * Miss
+		 ************************************/
 		// if not yet used, set to used and copy key
-		if(m_data[hash%m_data.size()].priority <= 0) {
+		if(data.priority <= 0) {
+#ifndef NDEBUG
+			if(loud){
+				std::cerr << "New" << std::endl;
+			}
+#endif //NDEBUG
 
 			// set bin to used
-			m_data[hash%m_data.size()].priority = 1;
-
+			data.priority = 1;
 
 			// copy into bin
-			std::get<0>(m_data[hash%m_data.size()].value) = std::move(value.first);
-			std::get<1>(m_data[hash%m_data.size()].value) = std::move(value.second);
+			std::get<0>(data.value) = std::move(value.first);
+			std::get<1>(data.value) = std::move(value.second);
 
 			// add to list of used bins
-			m_used.push_front(&m_data[hash%m_data.size()].value);
-			m_data[hash%m_data.size()].pos = this->begin();
-
-			return std::make_pair(this->begin(), true);
-		}
-
-		auto& data = m_data[hash%m_data.size()];
-
-		// if the value exists, and keys are equal, increase priority
-		if(std::get<0>(data.value) == value.first) {
-			if(data.priority < MAX_PRIORITY)
-				data.priority++;
-			return std::make_pair(data.pos, true);
-		} else {
-			bool doinsert = true;
-			if(prob) {
-				// probabilistic insert
-				doinsert = false; 
-
-				// the higher the probability, the lower the odds of replacement
-				if(m_rdist(m_rng) < pow(2,-data.priority))
-					doinsert = true;
+			m_used.push_front(&data.value);
+			data.pos = this->begin();
+#ifndef NDEBUG
+			if(loud){
+				std::cerr << "New" << std::endl;
+				std::cerr << (*(data.pos)).first << ":" << (*(data.pos)).first 
+					<< std::endl;
 			}
+#endif //NDEBUG
 
-			if(doinsert) {
-				// change the key, reinitialize data
+			return std::make_pair<iterator, bool>(this->begin(), true);
+		} 
+		/************************************
+		 * Hit
+		 ************************************/
+		else if(std::get<0>(data.value) == value.first) {
+			/*
+			 * keys are equal, increase priority
+			 */
+#ifndef NDEBUG
+			if(loud){
+				std::cerr << "Hit" << std::endl;
+			}
+#endif //NDEBUG
+			data.priority++;
+			return std::make_pair(data.pos, false);
+		} else if(prob) {
+			/*
+			 * keys are different, probabilistically replace 
+			 */
+			
+			// the higher the probability, the lower the odds of replacement
+			if(m_rdist(m_rng) < pow(2,-data.priority)) {
 				std::get<0>(data.value) = std::move(value.first);
 				std::get<1>(data.value) = std::move(value.second);
+				data.priority = 1;
+#ifndef NDEBUG
+				if(loud){
+					std::cerr << "Prob Replace" << std::endl;
+				}
+#endif// NDEBUG
+				
+				// return new 
+				return std::make_pair(data.pos, true);
+			} else {
+				// return old
+#ifndef NDEBUG
+				if(loud){
+					std::cerr << "Prob Keep" << std::endl;
+				}
+#endif //NDEBUG
+				return std::make_pair(data.pos, false);
 			}
+		} else {
+			/*
+			 * keys are different, replace 
+			 */
+#ifndef NDEBUG
+			if(loud){
+				std::cerr << "Force Replace" << std::endl;
+			}
+#endif //NDEBUG
+			std::get<0>(data.value) = std::move(value.first);
+			std::get<1>(data.value) = std::move(value.second);
+			data.priority = 1;
+
 			return std::make_pair(data.pos, true);
 		}
 	};
 
-private:
-	
-	struct Element
-	{
-		int priority;
-		typename unordered_buffer::iterator pos; 	//position in used list
-		std::pair<Key, T> value;			//actual values
-	};
 
-	// big array of the data, 0 = priority, 1 = key, 2 = data
-	// keeps the priority, 0 indicates unused
-	std::vector<Element> m_data;
-	std::list<std::pair<Key, T>*> m_used;
-
-	// it = m_used.begin();
-	// *it is a pair
-	// it->first
-
-	const Hash m_hasher;
-	std::default_random_engine m_rng;
-	std::uniform_real_distribution<double> m_rdist;
-
-	const int MAX_PRIORITY = 1000;
 };
 
