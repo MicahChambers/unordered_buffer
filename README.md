@@ -12,3 +12,7 @@ is 2^(hits-contests), where hits are repeated uses of the current occupier,
 and constest are the hits of colliding keys. Thus as long as there are 
 less contested values, the chance of being displaced is low. We cap the 
 hits-contests value to 1000, to prevent too much incumbancy. 
+
+TODO:
+
+Change rehash so that it properly maintains priorities
