@@ -13,7 +13,7 @@ int main()
 
 	std::unordered_map<int, double> truestore;
 	
-	size_t NUM = 3;
+	const size_t NUM = 3;
 	double KEYS[NUM] = {28, 9, 0};
 	double VALUES[NUM] = {.32, 1.8, 23};
 	
